@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/streamnative/oxia/common/logging"
-
+	"github.com/streamnative/oxia/proto"
 	"github.com/streamnative/oxia/server"
 )
 
@@ -960,4 +961,46 @@ func TestGetWithoutValue(t *testing.T) {
 	result = <-client.Get(keys[1], PartitionKey(key), IncludeValue(false), ComparisonLower())
 	assert.Nil(t, result.Value)
 	assert.Equal(t, result.Key, keys[0])
+}
+
+func TestGetResponseComparison(t *testing.T) {
+	a := "a"
+	b := "b"
+	c := "c"
+	s := "s"
+	v := proto.Version{}
+
+	data := [...]struct {
+		expected   string
+		comparison proto.KeyComparisonType
+		responses  []*proto.GetResponse
+	}{
+		{
+			expected:   a,
+			comparison: proto.KeyComparisonType_HIGHER,
+			responses: []*proto.GetResponse{
+				{Version: &v, Key: &b},
+				{Version: &v, Key: &c},
+				{Version: &v, Key: &a},
+			},
+		},
+		{
+			expected:   a,
+			comparison: proto.KeyComparisonType_HIGHER,
+			responses: []*proto.GetResponse{
+				{Version: &v, Key: &b, SecondaryIndexKey: &s},
+				{Version: &v, Key: &c, SecondaryIndexKey: &s},
+				{Version: &v, Key: &a, SecondaryIndexKey: &s},
+			},
+		},
+	}
+
+	for i := range data {
+		d := &data[i]
+		rs := slices.Clone(d.responses)
+		ch := make(chan GetResult, 1)
+		go processAllGetResponses(d.expected, rs, d.comparison, ch)
+		t.Logf("\n%v\n%v", d.responses, rs)
+		assert.Equal(t, GetResult{Key: d.expected}, <-ch)
+	}
 }
